@@ -107,7 +107,8 @@ jobs:
                    -d "{\"tag_name\":\"${release_tag}\",\"name\":\"i915 SR-IOV for ${release_tag}\",\"body\":\"Auto-built from strongtz/i915-sriov-dkms @ ${I915_REF}\"}" \
                    "${api}" | jq -r '.id')"
           fi
-          # upload (or replace) the package assets
+          # upload (or replace) the package assets via uploads.github.com
+          upload_api="https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${rid}/assets"
           for f in "$pkg" "$pkg.md5"; do
             base="$(basename "$f")"
             asset_id="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
@@ -120,6 +121,6 @@ jobs:
             curl -fsSL -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Content-Type: application/octet-stream" \
               --data-binary "@$f" \
-              "${api}/${rid}/assets?name=${base}"
+              "${upload_api}?name=${base}"
           done
           echo "Published ${pkg_base} to release ${release_tag}"
