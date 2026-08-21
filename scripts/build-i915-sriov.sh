@@ -106,7 +106,7 @@ done
 
 vermagic="$(modinfo -F vermagic "$I915_DIR/drivers/gpu/drm/i915/i915.ko" 2>/dev/null | head -1)"
 log "i915 vermagic: $vermagic"
-[ "$vermagic" = "$KERNEL_RELEASE SMP preempt mod_unload" ] || die "Vermagic mismatch: got '$vermagic', expected '$KERNEL_RELEASE SMP preempt mod_unload'"
+[ "$(echo "$vermagic" | xargs)" = "$(echo "$KERNEL_RELEASE SMP preempt mod_unload" | xargs)" ] || die "Vermagic mismatch: got '$vermagic', expected '$KERNEL_RELEASE SMP preempt mod_unload'"
 
 # ---------- 5. package .txz ----------
 PKG_VERSION="${I915_SRIOV_REF//./}"
