@@ -91,15 +91,35 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KERNEL_RELEASE: ${{ inputs.kernel_release }}
+          I915_REF: ${{ steps.resolve.outputs.i915_ref }}
         run: |
           set -euo pipefail
           pkg="$(ls out/i915-sriov-*.txz | head -1)"
           pkg_base="$(basename "$pkg")"
           release_tag="${KERNEL_RELEASE}"
-          # (re)create the release for this kernel so the plugin can find the
-          # newest package; keep older assets by only adding what's missing
-          gh release create "$release_tag" "$pkg" "$pkg.md5" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "i915 SR-IOV for ${KERNEL_RELEASE}" \
-            --notes "Auto-built from strongtz/i915-sriov-dkms @ ${{ steps.resolve.outputs.i915_ref }}" \
-            || gh release upload "$release_tag" "$pkg" "$pkg.md5" --repo "$GITHUB_REPOSITORY" --clobber
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases"
+          # find or create the release for this kernel tag
+          rid="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
+                  "${api}/tags/${release_tag}" | jq -r '.id // empty' 2>/dev/null || true)"
+          if [ -z "$rid" ]; then
+            rid="$(curl -fsSL -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
+                   -H "Accept: application/vnd.github+json" \
+                   -d "{\"tag_name\":\"${release_tag}\",\"name\":\"i915 SR-IOV for ${release_tag}\",\"body\":\"Auto-built from strongtz/i915-sriov-dkms @ ${I915_REF}\"}" \
+                   "${api}" | jq -r '.id')"
+          fi
+          # upload (or replace) the package assets
+          for f in "$pkg" "$pkg.md5"; do
+            base="$(basename "$f")"
+            asset_id="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
+                        "${api}/${rid}/assets?per_page=100" | \
+                        jq -r --arg n "$base" '.[] | select(.name == $n) | .id' | head -1)"
+            if [ -n "$asset_id" ]; then
+              curl -fsSL -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" \
+                "${api}/assets/${asset_id}"
+            fi
+            curl -fsSL -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@$f" \
+              "${api}/${rid}/assets?name=${base}"
+          done
+          echo "Published ${pkg_base} to release ${release_tag}"
