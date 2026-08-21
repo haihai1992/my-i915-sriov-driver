@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# build-i915-sriov.sh - build the strongtz i915-sriov-dkms modules for an
+# Unraid kernel, packaged as a Slackware .txz installable on the server.
+#
+# Works both locally and inside GitHub Actions (cloud build):
+#   1. fetch the ich777 Unraid kernel source tree (prebuilt, no kernel rebuild)
+#   2. clone strongtz/i915-sriov-dkms at the requested ref
+#   3. apply the Unraid 6.x slab-compat patch
+#   4. build the 4 modules (i915, kvmgt, xe, intel_sriov_compat)
+#   5. package them into i915-sriov-<ver>-<kernel>-Unraid-<build>.txz + md5
+#
+# Outputs land in ./out (or $OUT_DIR).
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# ---------- config (overridable via environment) ----------
+TARGET_KERNEL_VERSION="${TARGET_KERNEL_VERSION:-6.18.44}"
+KERNEL_RELEASE="${KERNEL_RELEASE:-${TARGET_KERNEL_VERSION}-Unraid}"
+JOBS="${JOBS:-$(nproc --all)}"
+KERNEL_ARCHIVE_URL="${KERNEL_ARCHIVE_URL:-https://github.com/ich777/unraid_kernel/releases/download/${KERNEL_RELEASE}/linux-${KERNEL_RELEASE}.tar.xz}"
+KERNEL_ARCHIVE_SHA256="${KERNEL_ARCHIVE_SHA256:-}"
+I915_SRIOV_REPO="${I915_SRIOV_REPO:-https://github.com/strongtz/i915-sriov-dkms.git}"
+I915_SRIOV_REF="${I915_SRIOV_REF:-2026.08.12.1}"
+I915_SRIOV_COMMIT="${I915_SRIOV_COMMIT:-}"
+I915_MAX_VFS="${I915_MAX_VFS:-7}"
+PACKAGE_BUILD="${PACKAGE_BUILD:-1}"
+CC="${CC:-gcc}"
+HOSTCC="${HOSTCC:-$CC}"
+CXX="${CXX:-g++}"
+HOSTCXX="${HOSTCXX:-$CXX}"
+export CC HOSTCC CXX HOSTCXX
+
+DOWNLOAD_DIR="${DOWNLOAD_DIR:-$ROOT_DIR/downloads}"
+BUILD_DIR="${BUILD_DIR:-$ROOT_DIR/build}"
+OUT_DIR="${OUT_DIR:-$ROOT_DIR/out}"
+KERNEL_DIR="$BUILD_DIR/linux-${TARGET_KERNEL_VERSION}"
+I915_DIR="$BUILD_DIR/i915-sriov-dkms-${I915_SRIOV_REF}"
+
+mkdir -p "$DOWNLOAD_DIR" "$BUILD_DIR" "$OUT_DIR"
+
+log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*" >&2; }
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+need_cmd() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; }
+
+kmake() {
+  make -C "$KERNEL_DIR" CC="$CC" HOSTCC="$HOSTCC" CXX="$CXX" HOSTCXX="$HOSTCXX" "$@"
+}
+
+# ---------- 1. kernel source tree ----------
+log "Fetching ich777 kernel tree ${KERNEL_RELEASE}"
+need_cmd curl
+need_cmd tar
+mkdir -p "$KERNEL_DIR"
+KERNEL_ARCHIVE="$DOWNLOAD_DIR/linux-${KERNEL_RELEASE}.tar.xz"
+if [ ! -s "$KERNEL_ARCHIVE" ]; then
+  curl -L --fail --retry 3 --retry-delay 2 -o "$KERNEL_ARCHIVE.tmp" "$KERNEL_ARCHIVE_URL"
+  mv "$KERNEL_ARCHIVE.tmp" "$KERNEL_ARCHIVE"
+fi
+if [ -n "$KERNEL_ARCHIVE_SHA256" ]; then
+  echo "$KERNEL_ARCHIVE_SHA256  $KERNEL_ARCHIVE" | sha256sum -c - >/dev/null || die "Kernel archive checksum mismatch"
+fi
+
+if [ ! -s "$KERNEL_DIR/.config" ] || [ ! -s "$KERNEL_DIR/Module.symvers" ]; then
+  log "Extracting kernel tree (this is a large archive, be patient)"
+  tar -xf "$KERNEL_ARCHIVE" -C "$KERNEL_DIR"
+fi
+[ -s "$KERNEL_DIR/.config" ] || die "Kernel tree missing .config"
+[ -s "$KERNEL_DIR/Module.symvers" ] || die "Kernel tree missing Module.symvers"
+
+# ---------- 2. strongtz source ----------
+log "Fetching i915-sriov-dkms ${I915_SRIOV_REF}"
+need_cmd git
+if [ -d "$I915_DIR/.git" ]; then
+  git -C "$I915_DIR" fetch --depth 1 origin "refs/tags/$I915_SRIOV_REF"
+  git -C "$I915_DIR" reset --hard FETCH_HEAD
+  git -C "$I915_DIR" clean -ffdqx
+else
+  git clone --depth 1 --branch "$I915_SRIOV_REF" "$I915_SRIOV_REPO" "$I915_DIR"
+fi
+if [ -n "$I915_SRIOV_COMMIT" ]; then
+  actual="$(git -C "$I915_DIR" rev-parse HEAD)"
+  [ "$actual" = "$I915_SRIOV_COMMIT" ] || die "i915 commit mismatch: expected $I915_SRIOV_COMMIT, got $actual"
+fi
+
+# ---------- 3. Unraid slab-compat patch ----------
+PATCH="$ROOT_DIR/patches/strongtz-2026.08.08-unraid-6x-slab.patch"
+log "Applying Unraid slab-compat patch"
+git -C "$I915_DIR" apply --check "$PATCH"
+git -C "$I915_DIR" apply "$PATCH"
+
+# ---------- 4. build modules ----------
+log "Building modules against ${KERNEL_RELEASE} (CC=$CC, JOBS=$JOBS)"
+need_cmd make
+kmake -j"$JOBS" M="$I915_DIR" modules 2>&1 | tee "$OUT_DIR/build-i915.log"
+
+for m in \
+  "$I915_DIR/drivers/gpu/drm/i915/i915.ko" \
+  "$I915_DIR/drivers/gpu/drm/i915/kvmgt.ko" \
+  "$I915_DIR/drivers/gpu/drm/xe/xe.ko" \
+  "$I915_DIR/compat/intel_sriov_compat.ko"; do
+  [ -s "$m" ] || die "Missing built module: $m"
+done
+
+vermagic="$(modinfo -F vermagic "$I915_DIR/drivers/gpu/drm/i915/i915.ko" 2>/dev/null | head -1)"
+log "i915 vermagic: $vermagic"
+[ "$vermagic" = "$KERNEL_RELEASE SMP preempt mod_unload" ] || die "Vermagic mismatch: got '$vermagic', expected '$KERNEL_RELEASE SMP preempt mod_unload'"
+
+# ---------- 5. package .txz ----------
+PKG_VERSION="${I915_SRIOV_REF//./}"
+PKG_NAME="i915-sriov-${PKG_VERSION}-${KERNEL_RELEASE}-${PACKAGE_BUILD}"
+STAGE="$BUILD_DIR/stage-${PKG_NAME}"
+rm -rf "$STAGE"
+mkdir -p "$STAGE/lib/modules/${KERNEL_RELEASE}/updates/compat"
+mkdir -p "$STAGE/lib/modules/${KERNEL_RELEASE}/kernel/drivers/gpu/drm/i915"
+mkdir -p "$STAGE/lib/modules/${KERNEL_RELEASE}/kernel/drivers/gpu/drm/xe"
+
+cp "$I915_DIR/compat/intel_sriov_compat.ko" \
+   "$STAGE/lib/modules/${KERNEL_RELEASE}/updates/compat/"
+cp "$I915_DIR/drivers/gpu/drm/i915/i915.ko" \
+   "$I915_DIR/drivers/gpu/drm/i915/kvmgt.ko" \
+   "$STAGE/lib/modules/${KERNEL_RELEASE}/kernel/drivers/gpu/drm/i915/"
+cp "$I915_DIR/drivers/gpu/drm/xe/xe.ko" \
+   "$STAGE/lib/modules/${KERNEL_RELEASE}/kernel/drivers/gpu/drm/xe/"
+
+# compress the in-tree modules like the stock Unraid layout (i915.ko.xz)
+need_cmd xz
+for ko in "$STAGE"/lib/modules/${KERNEL_RELEASE}/kernel/drivers/gpu/drm/i915/*.ko \
+          "$STAGE"/lib/modules/${KERNEL_RELEASE}/kernel/drivers/gpu/drm/xe/*.ko; do
+  [ -e "$ko" ] || continue
+  xz -f -9 --check=crc32 "$ko"
+done
+
+log "Packaging ${PKG_NAME}.txz"
+tar -cJf "$OUT_DIR/${PKG_NAME}.txz" --owner=root --group=root -C "$STAGE" .
+md5sum "$OUT_DIR/${PKG_NAME}.txz" > "$OUT_DIR/${PKG_NAME}.txz.md5"
+
+# installed-modules manifest for verification
+{
+  echo "i915 module: $(modinfo -F version "$I915_DIR/drivers/gpu/drm/i915/i915.ko" | head -1)"
+  echo "vermagic:    $vermagic"
+  echo "max_vfs:     $I915_MAX_VFS"
+} > "$OUT_DIR/i915-installed-modules.txt"
+
+log "DONE: $OUT_DIR/${PKG_NAME}.txz ($(du -h "$OUT_DIR/${PKG_NAME}.txz" | cut -f1))"
