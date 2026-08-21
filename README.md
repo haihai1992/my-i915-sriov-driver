@@ -1,73 +1,46 @@
 # my-i915-sriov-driver
 
-Intel i915 SR-IOV kernel modules for **Unraid**, built from
-[strongtz/i915-sriov-dkms](https://github.com/strongtz/i915-sriov-dkms) and
-packaged as a Slackware `.txz` that installs directly on an Unraid server.
+为 **Unraid** 编译的 **Intel i915 SR-IOV 驱动**，基于 [strongtz/i915-sriov-dkms](https://github.com/strongtz/i915-sriov-dkms) 源码构建，打包为可直接安装到 Unraid 服务器的 Slackware `.txz` 格式。
 
-Used together with the [my-unraid-vgpu-manager](https://github.com/hellomrli/my-unraid-vgpu-manager)
-plugin, which downloads this package, installs it and manages virtual
-functions (VFs) for VM passthrough.
+配合 [my-unraid-vgpu-manager](https://github.com/hellomrli/my-unraid-vgpu-manager) 插件使用——插件负责下载本包、安装并管理 VF（虚拟功能）供虚拟机直通。
 
-## What this produces
+## 功能
+
+- 在 Intel iGPU（支持 SR-IOV 的型号）上启用虚拟功能（VF）
+- 每个 VF 可作为一个独立 GPU 直通给虚拟机
+- 基于 strongtz 的 DKMS 模块，包含 Unraid 6.x 内核的 slab 兼容补丁
+
+## 编译的模块
+
+- `i915.ko` — 带 SR-IOV 支持的 i915 驱动
+- `kvmgt.ko` — Intel GVT-g / mdev 支持
+- `xe.ko` — 新 Xe 驱动（默认 blacklist，避免与 i915 冲突）
+- `intel_sriov_compat.ko` — SR-IOV 兼容层
+
+## 构建产物
 
 ```
-out/i915-sriov-<ver>-<kernel>-Unraid-<build>.txz
-out/i915-sriov-<ver>-<kernel>-Unraid-<build>.txz.md5
+out/i915-sriov-<版本>-<内核>-Unraid-<构建号>.txz   (+ .md5)
 ```
 
-The package contains four modules for the target Unraid kernel:
+## 云编译（GitHub Actions）
 
-| module                | location in package                                                     |
-|-----------------------|-------------------------------------------------------------------------|
-| `i915.ko.xz`          | `lib/modules/<kernel>/kernel/drivers/gpu/drm/i915/`                     |
-| `kvmgt.ko.xz`         | `lib/modules/<kernel>/kernel/drivers/gpu/drm/i915/`                     |
-| `xe.ko.xz`            | `lib/modules/<kernel>/kernel/drivers/gpu/drm/xe/`                       |
-| `intel_sriov_compat.ko` | `lib/modules/<kernel>/updates/compat/`                                |
+`.github/workflows/build.yml` 执行 `scripts/build-i915-sriov.sh`：
 
-A Unraid `slab` compatibility patch (see `patches/`) is applied to the
-strongtz source before building on 6.x kernels.
+- **手动触发**：运行 *Build i915 SR-IOV driver* 工作流，填写 strongtz 版本（如 `2026.08.12.1`）、Unraid 内核版本和构建号
+- **每日自动检查**：每天 03:30（UTC）自动检查 strongtz 是否有新版本并构建最新版
+- 自动从 ich777 内核仓库下载对应内核源码树，应用 Unraid slab 补丁后编译
 
-## Releases
+构建产物附加到 **tag 等于内核版本** 的 Release（如 `6.18.44-Unraid`、`6.18.43-Unraid`）。
 
-The GitHub Actions workflow (`build-i915-sriov.sh` + `.github/workflows/build.yml`)
-builds the driver **in the cloud**:
-
-- **manual**: run the *Build i915 SR-IOV driver* workflow, choose a strongtz
-  tag (or `latest`), the Unraid kernel release and the package build number
-- **daily**: a scheduled run picks up the newest strongtz release automatically
-
-The resulting package is attached to a Release whose tag equals the kernel
-release (e.g. `6.18.44-Unraid`), so the plugin can find it by kernel.
-
-## Local build
+## 本地构建
 
 ```bash
-# requires a Linux box with gcc/make/git/curl/tar/xz
-TARGET_KERNEL_VERSION=6.18.44 KERNEL_RELEASE=6.18.44-Unraid \
-I915_SRIOV_REF=2026.08.12.1 \
+# 需要 Linux 环境，装有 gcc/make/curl/tar/xz
+I915_SRIOV_REF=2026.08.12.1 KERNEL_RELEASE=6.18.44-Unraid \
 ./scripts/build-i915-sriov.sh
 ```
 
-The script downloads the ich777 Unraid kernel source tree
-(`linux-6.18.44-Unraid.tar.xz`) which contains the prebuilt `.config` and
-`Module.symvers`, builds the four modules against it, then packages them.
+## Release
 
-## Installation on Unraid
-
-Install the package and reload the module stack:
-
-```bash
-upgradepkg --install-new --reinstall i915-sriov-<ver>-6.18.44-Unraid-1.txz
-depmod -a
-modprobe i915 enable_guc=3 max_vfs=7
-echo 7 > /sys/devices/pci0000:00/0000:00:02.0/sriov_numvfs
-```
-
-Add to the syslinux append line for persistent SR-IOV at boot:
-
-```
-intel_iommu=on i915.enable_guc=3 i915.max_vfs=7 module_blacklist=xe
-```
-
-**Do not passthrough the PF (00:02.0) to a VM** - it would crash all other
-VFs. Only passthrough VFs (00:02.1 - 00:02.7).
+当前构建：**2026.08.12.1** for **6.18.44-Unraid / 6.18.43-Unraid**（tag 与内核版本一致）。
