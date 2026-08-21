@@ -133,6 +133,31 @@ for ko in "$STAGE"/lib/modules/${KERNEL_RELEASE}/kernel/drivers/gpu/drm/i915/*.k
   xz -f -9 --check=crc32 "$ko"
 done
 
+# Slackware package metadata: doinst.sh runs after install so modprobe can find
+# the freshly installed modules (depmod), matching giganode's makepkg behaviour.
+need_cmd md5sum
+mkdir -p "$STAGE/install"
+cat > "$STAGE/install/doinst.sh" <<'EOF'
+# refresh module dependencies so intel_sriov_compat / i915 / kvmgt / xe resolve
+if [ -x /sbin/depmod ]; then
+  /sbin/depmod -a >/dev/null 2>&1
+fi
+EOF
+chmod 755 "$STAGE/install/doinst.sh"
+cat > "$STAGE/install/slack-desc" <<EOF
+       |-----handy-ruler------------------------------------------------------|
+i915-sriov: i915-sriov - Intel i915 SR-IOV driver for Unraid
+i915-sriov:
+i915-sriov: Source: https://github.com/strongtz/i915-sriov-dkms
+i915-sriov:
+i915-sriov: Custom i915 SR-IOV package for Unraid kernel ${KERNEL_RELEASE}
+i915-sriov: modules: i915.ko, kvmgt.ko, xe.ko, intel_sriov_compat.ko
+i915-sriov:
+i915-sriov:
+i915-sriov:
+i915-sriov:
+EOF
+
 log "Packaging ${PKG_NAME}.txz"
 tar -cJf "$OUT_DIR/${PKG_NAME}.txz" --owner=root --group=root -C "$STAGE" .
 md5sum "$OUT_DIR/${PKG_NAME}.txz" > "$OUT_DIR/${PKG_NAME}.txz.md5"
