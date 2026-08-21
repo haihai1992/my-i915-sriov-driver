@@ -33,6 +33,10 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    container:
+      # GCC 15 matches the official Unraid kernel toolchain; the 6.18 kernel
+      # requires -fmin-function-alignment (gcc >= 14).
+      image: gcc:15.3.0
     env:
       DEBIAN_FRONTEND: noninteractive
       TZ: UTC
@@ -43,11 +47,11 @@ jobs:
       - name: Install build dependencies
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          apt-get update
+          apt-get install -y --no-install-recommends \
             bc bison build-essential ca-certificates curl flex git kmod \
             libelf-dev make tar xz-utils
-          sudo rm -rf /var/lib/apt/lists/*
+          rm -rf /var/lib/apt/lists/*
           gcc --version | head -1
           nproc
 
