@@ -9,9 +9,9 @@ on:
         default: 'latest'
         type: string
       kernel_release:
-        description: 'Unraid kernel release to build for (e.g. 6.18.44-Unraid)'
+        description: 'Unraid kernel release to build for (e.g. 6.18.44-Unraid), or "latest" to auto-detect from ich777/unraid_kernel'
         required: false
-        default: '6.18.44-Unraid'
+        default: 'latest'
         type: string
       package_build:
         description: 'Package build number'
@@ -19,7 +19,8 @@ on:
         default: '1'
         type: string
   schedule:
-    # Daily check for new strongtz releases (cloud build of the newest version)
+    # 每天定时检测 strongtz/i915-sriov-dkms 与 ich777/unraid_kernel 两个仓库，
+    # 只有当任一仓库发布新版本时才编译；都没更新则跳过。
     - cron: '30 3 * * *'
 
 permissions:
@@ -73,12 +74,61 @@ jobs:
           echo "i915_ref=$ref" >> "$GITHUB_OUTPUT"
           echo "Resolved strongtz ref: $ref"
 
+      - name: Resolve kernel release
+        id: resolve_kernel
+        shell: bash
+        env:
+          KERNEL_RELEASE_INPUT: ${{ inputs.kernel_release }}
+        run: |
+          set -euo pipefail
+          kr="${KERNEL_RELEASE_INPUT:-latest}"
+          if [ "$kr" = "latest" ]; then
+            # fetch the newest ich777 Unraid kernel release tag
+            kr="$(curl -fsSL https://api.github.com/repos/ich777/unraid_kernel/releases/latest \
+              | jq -r '.tag_name')"
+          fi
+          echo "kernel_release=$kr" >> "$GITHUB_OUTPUT"
+          echo "Resolved Unraid kernel release: $kr"
+
+      - name: Check if this version is already built
+        id: check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KERNEL_RELEASE: ${{ steps.resolve_kernel.outputs.kernel_release }}
+          I915_REF: ${{ steps.resolve.outputs.i915_ref }}
+        run: |
+          set -euo pipefail
+          # 手动触发永远编译；只有定时任务才做“有新版本才编译”的判断
+          if [ "$GITHUB_EVENT_NAME" != "schedule" ]; then
+            echo "new_version=true" >> "$GITHUB_OUTPUT"
+            echo "Manual dispatch: always build"
+            exit 0
+          fi
+          pkgver="${I915_REF//./}"
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases"
+          rid="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" "${api}/tags/${KERNEL_RELEASE}" | jq -r '.id // empty' 2>/dev/null || true)"
+          if [ -z "$rid" ]; then
+            echo "No release for ${KERNEL_RELEASE} yet -> new driver needed"
+            echo "new_version=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" "${api}/${rid}/assets?per_page=100" | \
+             jq -e --arg n "i915-sriov-${pkgver}-" 'any(.[]; (.name | startswith($n)))' >/dev/null 2>&1; then
+            echo "strongtz ${I915_REF} @ ${KERNEL_RELEASE} already built; skipping"
+            echo "new_version=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New driver needed: strongtz ${I915_REF} @ ${KERNEL_RELEASE}"
+            echo "new_version=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build i915 SR-IOV package
+        if: steps.check.outputs.new_version == 'true'
         shell: bash
         env:
           I915_SRIOV_REF: ${{ steps.resolve.outputs.i915_ref }}
-          KERNEL_RELEASE: ${{ inputs.kernel_release }}
-          TARGET_KERNEL_VERSION: ${{ inputs.kernel_release }}
+          KERNEL_RELEASE: ${{ steps.resolve_kernel.outputs.kernel_release }}
+          TARGET_KERNEL_VERSION: ${{ steps.resolve_kernel.outputs.kernel_release }}
           PACKAGE_BUILD: ${{ inputs.package_build }}
         run: |
           set -euo pipefail
@@ -87,10 +137,11 @@ jobs:
           ./scripts/build-i915-sriov.sh
 
       - name: Publish Release
+        if: steps.check.outputs.new_version == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          KERNEL_RELEASE: ${{ inputs.kernel_release }}
+          KERNEL_RELEASE: ${{ steps.resolve_kernel.outputs.kernel_release }}
           I915_REF: ${{ steps.resolve.outputs.i915_ref }}
         run: |
           set -euo pipefail

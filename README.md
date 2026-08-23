@@ -27,8 +27,8 @@ out/i915-sriov-<版本>-<内核>-Unraid-<构建号>.txz   (+ .md5)
 
 `.github/workflows/build.yml` 执行 `scripts/build-i915-sriov.sh`：
 
-- **手动触发**：运行 *Build i915 SR-IOV driver* 工作流，填写 strongtz 版本（如 `2026.08.12.1`）、Unraid 内核版本和构建号
-- **每日自动检查**：每天 03:30（UTC）自动检查 strongtz 是否有新版本并构建最新版
+- **手动触发**：运行 *Build i915 SR-IOV driver* 工作流，填写 strongtz 版本（如 `2026.08.12.1`）、Unraid 内核版本和构建号（留空则自动取最新）
+- **每日自动检查**：每天 03:30（UTC）同时检测 [strongtz/i915-sriov-dkms](https://github.com/strongtz/i915-sriov-dkms) 和 [ich777/unraid_kernel](https://github.com/ich777/unraid_kernel) 两个仓库，**只有当任一仓库发布新版本时才编译**；两个都没更新则跳过，不再空跑
 - 自动从 ich777 内核仓库下载对应内核源码树，应用 Unraid slab 补丁后编译
 
 构建产物附加到 **tag 等于内核版本** 的 Release（如 `6.18.44-Unraid`、`6.18.43-Unraid`）。
