@@ -23,6 +23,7 @@ KERNEL_ARCHIVE_URL="${KERNEL_ARCHIVE_URL:-https://github.com/ich777/unraid_kerne
 # Per-release SHA256 of the ich777 kernel archive; unknown releases fall back
 # to no check so builds for new kernels keep working.
 case "${KERNEL_RELEASE}" in
+  6.12.90-Unraid) DEFAULT_KERNEL_SHA256="eb712cc36f62c1514fbe119ed2108b96337636dd1ff7d73bfd6f934015c3607c" ;;
   6.12.98-Unraid) DEFAULT_KERNEL_SHA256="9e8e5fd3d460329bd64704a131bc74c75e1701bcecefcc55638f651fc9d2bf31" ;;
   6.18.44-Unraid) DEFAULT_KERNEL_SHA256="618df8d001e9f98b95306eb2eac4cb776d0bf4b98061f0f4cedbc10c1468858d" ;;
   6.18.45-Unraid) DEFAULT_KERNEL_SHA256="365dee16bbd9c505d36a0d0a1a2bc63723f8a8d55b2f7c7991d806a4c849df7b" ;;
