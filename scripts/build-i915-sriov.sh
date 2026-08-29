@@ -183,7 +183,7 @@ EOF
 
 log "Packaging ${PKG_NAME}.txz"
 tar -cJf "$OUT_DIR/${PKG_NAME}.txz" --owner=root --group=root -C "$STAGE" .
-md5sum "$OUT_DIR/${PKG_NAME}.txz" > "$OUT_DIR/${PKG_NAME}.txz.md5"
+(cd "$OUT_DIR" && md5sum "${PKG_NAME}.txz" > "${PKG_NAME}.txz.md5")
 
 # installed-modules manifest for verification
 {
