@@ -23,6 +23,7 @@ KERNEL_ARCHIVE_URL="${KERNEL_ARCHIVE_URL:-https://github.com/ich777/unraid_kerne
 # Per-release SHA256 of the ich777 kernel archive; unknown releases fall back
 # to no check so builds for new kernels keep working.
 case "${KERNEL_RELEASE}" in
+  6.12.98-Unraid) DEFAULT_KERNEL_SHA256="9e8e5fd3d460329bd64704a131bc74c75e1701bcecefcc55638f651fc9d2bf31" ;;
   6.18.44-Unraid) DEFAULT_KERNEL_SHA256="618df8d001e9f98b95306eb2eac4cb776d0bf4b98061f0f4cedbc10c1468858d" ;;
   6.18.45-Unraid) DEFAULT_KERNEL_SHA256="365dee16bbd9c505d36a0d0a1a2bc63723f8a8d55b2f7c7991d806a4c849df7b" ;;
   6.18.46-Unraid) DEFAULT_KERNEL_SHA256="e8969f6a5d31106ae5ebf821ba128e043dcda78bc5f1f1a6344a8e46c9c9e280" ;;
@@ -94,11 +95,24 @@ if [ -n "$I915_SRIOV_COMMIT" ]; then
   [ "$actual" = "$I915_SRIOV_COMMIT" ] || die "i915 commit mismatch: expected $I915_SRIOV_COMMIT, got $actual"
 fi
 
+# Upstream caps the supported kernel range per release (e.g. 2026.03.05.x is
+# 6.12-6.19 while 2026.05.03+ drops 6.12), so refuse early on a bad pairing.
+exclusive="$(sed -n 's/^BUILD_EXCLUSIVE_KERNEL="\(.*\)"$/\1/p' "$I915_DIR/dkms.conf")"
+if [ -n "$exclusive" ]; then
+  echo "${TARGET_KERNEL_VERSION}" | grep -Eq "$exclusive" || \
+    die "strongtz ${I915_SRIOV_REF} does not support kernel ${TARGET_KERNEL_VERSION} (dkms.conf BUILD_EXCLUSIVE_KERNEL=${exclusive}); pick a matching i915 ref (e.g. 2026.03.05.6 for 6.12.x)"
+fi
+
 # ---------- 3. Unraid slab-compat patch ----------
+# Only strongtz >= 2026.08 sources carry include/linux/slab.h with the
+# backported alloc helpers; older refs never had the file and don't need it.
 PATCH="$ROOT_DIR/patches/strongtz-2026.08.08-unraid-6x-slab.patch"
-log "Applying Unraid slab-compat patch"
-git -C "$I915_DIR" apply --check "$PATCH"
-git -C "$I915_DIR" apply "$PATCH"
+if [ -f "$I915_DIR/include/linux/slab.h" ] && git -C "$I915_DIR" apply --check "$PATCH" 2>/dev/null; then
+  log "Applying Unraid slab-compat patch"
+  git -C "$I915_DIR" apply "$PATCH"
+else
+  log "Skipping Unraid slab-compat patch (not applicable to ${I915_SRIOV_REF})"
+fi
 
 # ---------- 4. build modules ----------
 log "Building modules against ${KERNEL_RELEASE} (CC=$CC, JOBS=$JOBS)"

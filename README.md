@@ -29,9 +29,18 @@ out/i915-sriov-<版本>-<内核>-Unraid-<构建号>.txz   (+ .md5)
 
 - **手动触发**：运行 *Build i915 SR-IOV driver* 工作流，填写 strongtz 版本（如 `2026.08.12.1`）、Unraid 内核版本和构建号（留空则自动取最新）
 - **每日自动检查**：每天 03:30（UTC）同时检测 [strongtz/i915-sriov-dkms](https://github.com/strongtz/i915-sriov-dkms) 和 [ich777/unraid_kernel](https://github.com/ich777/unraid_kernel) 两个仓库，**只有当任一仓库发布新版本时才编译**；两个都没更新则跳过，不再空跑
-- 自动从 ich777 内核仓库下载对应内核源码树，应用 Unraid slab 补丁后编译
+- 自动从 ich777 内核仓库下载对应内核源码树，应用 Unraid slab 补丁后编译（补丁仅对含 `include/linux/slab.h` 的 strongtz 源码生效，旧版源码自动跳过）
 
 构建产物附加到 **tag 等于内核版本** 的 Release（如 `6.18.44-Unraid`、`6.18.43-Unraid`）。
+
+### 内核 ↔ strongtz 版本对应
+
+strongtz 上游每个版本限定了支持的内核范围（`dkms.conf` 的 `BUILD_EXCLUSIVE_KERNEL`），构建脚本会自动校验并提前报错：
+
+| Unraid 内核 | 应选 strongtz 版本 | 备注 |
+|---|---|---|
+| 6.12.x（如 `6.12.98-Unraid`，Unraid 7.1.x） | `2026.03.05.6` | `2026.05.03` 起 upstream 放弃 6.12 |
+| 6.17 – 7.1 | `2026.08.12.1`（最新） | |
 
 ## 本地构建
 
