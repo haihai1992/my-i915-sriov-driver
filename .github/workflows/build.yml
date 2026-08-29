@@ -35,11 +35,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     container:
-      # GCC 15 matches the official Unraid kernel toolchain for 6.18+ (the 6.18
-      # kernel requires -fmin-function-alignment, gcc >= 14). 6.12-era kernels
-      # (Unraid 7.1) were built with GCC 13, so use gcc:13 there to stay close
-      # to the official toolchain.
-      image: ${{ startsWith(inputs.kernel_release, '6.12') && 'gcc:13.3.0' || 'gcc:15.3.0' }}
+      # GCC 15 matches the official Unraid kernel toolchain. All ich777 Unraid
+      # kernel trees (6.12 and 6.18 alike) enable -fmin-function-alignment,
+      # which requires gcc >= 14.
+      image: gcc:15.3.0
     env:
       DEBIAN_FRONTEND: noninteractive
       TZ: UTC
