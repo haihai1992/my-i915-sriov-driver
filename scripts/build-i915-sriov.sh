@@ -162,8 +162,9 @@ need_cmd md5sum
 mkdir -p "$STAGE/install"
 cat > "$STAGE/install/doinst.sh" <<'EOF'
 # refresh module dependencies so intel_sriov_compat / i915 / kvmgt / xe resolve
-if [ -x /sbin/depmod ]; then
-  /sbin/depmod -a >/dev/null 2>&1
+# (depmod lives in /usr/sbin on Unraid 7, not /sbin)
+if command -v depmod >/dev/null 2>&1; then
+  depmod -a >/dev/null 2>&1
 fi
 EOF
 chmod 755 "$STAGE/install/doinst.sh"
