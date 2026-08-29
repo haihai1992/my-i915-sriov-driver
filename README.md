@@ -43,4 +43,4 @@ I915_SRIOV_REF=2026.08.12.1 KERNEL_RELEASE=6.18.44-Unraid \
 
 ## Release
 
-当前构建：**2026.08.12.1** for **6.18.44-Unraid / 6.18.43-Unraid**（tag 与内核版本一致）。
+当前构建：**2026.08.12.1** for **6.18.43–6.18.47-Unraid**（tag 与内核版本一致）。
